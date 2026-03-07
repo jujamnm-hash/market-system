@@ -7,6 +7,7 @@ export interface Product {
   category: string;
   buyPrice: number;
   sellPrice: number;
+  avgCost: number;   // Weighted Average Cost — updated on every purchase
   stock: number;
   minStock: number;
   unit: string;
@@ -45,11 +46,14 @@ export interface InvoiceItem {
   barcode: string;
   qty: number;
   price: number;
+  costPrice?: number;  // avgCost at time of sale (for COGS) — optional for purchase items
+  expiryDate?: string; // optional per-item expiry date set at purchase time
   total: number;
 }
 
 // ==================== SALE INVOICE ====================
 export type PaymentType = 'cash' | 'debt';
+export type PurchasePaymentType = 'cash' | 'debt' | 'gift';
 
 export interface SaleInvoice {
   id: string;
@@ -80,7 +84,7 @@ export interface PurchaseInvoice {
   total: number;
   paid: number;
   remaining: number;
-  paymentType: PaymentType;
+  paymentType: PurchasePaymentType;
   notes?: string;
 }
 
@@ -129,6 +133,19 @@ export interface SalaryPayment {
   notes?: string;
 }
 
+// ==================== EXPIRY BATCH ====================
+export interface ExpiryBatch {
+  id: string;
+  productId: string;
+  productName: string;
+  barcode: string;
+  qty: number;
+  purchaseDate: string;       // date purchased
+  expiryDate: string;         // YYYY-MM-DD
+  purchaseInvoiceId?: string;
+  buyPrice: number;
+}
+
 // ==================== APP STATE ====================
 export interface AppState {
   products: Product[];
@@ -141,4 +158,5 @@ export interface AppState {
   expenses: Expense[];
   employees: Employee[];
   salaryPayments: SalaryPayment[];
+  expiryBatches: ExpiryBatch[];
 }

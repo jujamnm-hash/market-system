@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import type { AppState, Product, Category, Supplier, Customer, SaleInvoice, PurchaseInvoice, ReturnInvoice, Expense, Employee, SalaryPayment } from '../types';
+import type { AppState, Product, Category, Supplier, Customer, SaleInvoice, PurchaseInvoice, ReturnInvoice, Expense, Employee, SalaryPayment, ExpiryBatch } from '../types';
 import { loadState, saveState } from '../utils/storage';
 
 type Action =
@@ -39,7 +39,13 @@ type Action =
   | { type: 'DELETE_EMPLOYEE'; payload: string }
   // Salary
   | { type: 'ADD_SALARY'; payload: SalaryPayment }
-  | { type: 'DELETE_SALARY'; payload: string };
+  | { type: 'DELETE_SALARY'; payload: string }
+  // Weighted Average Cost
+  | { type: 'UPDATE_AVG_COST'; payload: { id: string; newQty: number; newBuyPrice: number } }
+  // Expiry Batches
+  | { type: 'ADD_EXPIRY_BATCH'; payload: ExpiryBatch }
+  | { type: 'DELETE_EXPIRY_BATCH'; payload: string }
+  | { type: 'UPDATE_EXPIRY_BATCH_QTY'; payload: { id: string; qty: number } };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -51,6 +57,21 @@ function reducer(state: AppState, action: Action): AppState {
       ...state,
       products: state.products.map(p => p.id === action.payload.id ? { ...p, stock: Math.max(0, p.stock + action.payload.delta) } : p)
     };
+    case 'UPDATE_AVG_COST': {
+      const { id, newQty, newBuyPrice } = action.payload;
+      return {
+        ...state,
+        products: state.products.map(p => {
+          if (p.id !== id) return p;
+          const currentAvg = p.avgCost > 0 ? p.avgCost : p.buyPrice;
+          const currentStock = Math.max(0, p.stock);
+          const wac = currentStock <= 0
+            ? newBuyPrice
+            : Math.round((currentStock * currentAvg + newQty * newBuyPrice) / (currentStock + newQty));
+          return { ...p, avgCost: wac, buyPrice: wac };
+        }),
+      };
+    }
     case 'ADD_CATEGORY': return { ...state, categories: [...state.categories, action.payload] };
     case 'UPDATE_CATEGORY': return { ...state, categories: state.categories.map(c => c.id === action.payload.id ? action.payload : c) };
     case 'DELETE_CATEGORY': return { ...state, categories: state.categories.filter(c => c.id !== action.payload) };
@@ -73,6 +94,9 @@ function reducer(state: AppState, action: Action): AppState {
     case 'DELETE_EMPLOYEE': return { ...state, employees: state.employees.filter(e => e.id !== action.payload) };
     case 'ADD_SALARY': return { ...state, salaryPayments: [action.payload, ...state.salaryPayments] };
     case 'DELETE_SALARY': return { ...state, salaryPayments: state.salaryPayments.filter(s => s.id !== action.payload) };
+    case 'ADD_EXPIRY_BATCH': return { ...state, expiryBatches: [action.payload, ...state.expiryBatches] };
+    case 'DELETE_EXPIRY_BATCH': return { ...state, expiryBatches: state.expiryBatches.filter(b => b.id !== action.payload) };
+    case 'UPDATE_EXPIRY_BATCH_QTY': return { ...state, expiryBatches: state.expiryBatches.map(b => b.id === action.payload.id ? { ...b, qty: action.payload.qty } : b) };
     default: return state;
   }
 }

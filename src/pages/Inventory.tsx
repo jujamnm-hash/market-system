@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useLang } from '../context/LangContext';
 import { generateId } from '../utils/storage';
 import { formatMoney } from '../utils/helpers';
 import Modal from '../components/Modal';
+import BarcodeScanner from '../components/BarcodeScanner';
 import { Plus, Search, Edit, Trash2, AlertTriangle, Tag, ScanLine } from 'lucide-react';
 import type { Product, Category } from '../types';
 
@@ -11,11 +13,18 @@ type Tab = 'products' | 'categories';
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
 const emptyProduct: Omit<Product, 'id' | 'createdAt'> = {
-  name: '', barcode: '', category: '', buyPrice: 0, sellPrice: 0, stock: 0, minStock: 5, unit: 'حبة',
+  name: '', barcode: '', category: '', buyPrice: 0, sellPrice: 0, avgCost: 0, stock: 0, minStock: 5, unit: 'حبة',
+};
+
+const UNIT_OPTIONS = ['حبة', 'كغ', 'لتر', 'م', 'Pack', 'Box', 'كرتون', 'كيس'];
+const UNIT_LABELS_EN: Record<string, string> = {
+  'حبة': 'Piece', 'كغ': 'KG', 'لتر': 'Liter', 'م': 'Meter',
+  'Pack': 'Pack', 'Box': 'Box', 'كرتون': 'Carton', 'كيس': 'Bag',
 };
 
 export default function Inventory() {
   const { state, dispatch } = useApp();
+  const { t, lang } = useLang();
   const [tab, setTab] = useState<Tab>('products');
   const [search, setSearch] = useState('');
   const [selectedCat, setSelectedCat] = useState('');
@@ -26,6 +35,19 @@ export default function Inventory() {
   const [form, setForm] = useState(emptyProduct);
   const [catForm, setCatForm] = useState({ name: '', color: COLORS[0] });
   const [showLowOnly, setShowLowOnly] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+
+  const handleBarcodeScanned = (code: string) => {
+    // search for existing product first
+    const found = state.products.find(p => p.barcode === code);
+    if (found) {
+      openEdit(found);
+    } else {
+      setForm({ ...emptyProduct, barcode: code });
+      setEditing(null);
+      setShowModal(true);
+    }
+  };
 
   const filteredProducts = state.products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.barcode.includes(search);
@@ -37,7 +59,7 @@ export default function Inventory() {
   const openAdd = () => { setEditing(null); setForm(emptyProduct); setShowModal(true); };
   const openEdit = (p: Product) => {
     setEditing(p);
-    setForm({ name: p.name, barcode: p.barcode, category: p.category, buyPrice: p.buyPrice, sellPrice: p.sellPrice, stock: p.stock, minStock: p.minStock, unit: p.unit });
+    setForm({ name: p.name, barcode: p.barcode, category: p.category, buyPrice: p.buyPrice, sellPrice: p.sellPrice, avgCost: p.avgCost, stock: p.stock, minStock: p.minStock, unit: p.unit });
     setShowModal(true);
   };
 
@@ -46,13 +68,16 @@ export default function Inventory() {
     if (editing) {
       dispatch({ type: 'UPDATE_PRODUCT', payload: { ...editing, ...form } });
     } else {
-      dispatch({ type: 'ADD_PRODUCT', payload: { id: generateId(), createdAt: new Date().toISOString(), ...form, barcode: form.barcode || generateId() } });
+      // For new products added manually, avgCost = buyPrice initially
+      const payload = { id: generateId(), createdAt: new Date().toISOString(), ...form, barcode: form.barcode || generateId() };
+      if (!payload.avgCost || payload.avgCost === 0) payload.avgCost = payload.buyPrice;
+      dispatch({ type: 'ADD_PRODUCT', payload });
     }
     setShowModal(false);
   };
 
   const deleteProduct = (id: string) => {
-    if (confirm('هل أنت متأكد من حذف هذا المنتج؟')) dispatch({ type: 'DELETE_PRODUCT', payload: id });
+    if (confirm(t('deleteProductConfirm'))) dispatch({ type: 'DELETE_PRODUCT', payload: id });
   };
 
   const saveCat = () => {
@@ -65,20 +90,20 @@ export default function Inventory() {
   const lowCount = state.products.filter(p => p.stock <= p.minStock).length;
 
   return (
-    <div className="pb-24 pt-16 px-3 fade-in">
+    <div className="px-3 fade-in" style={{ paddingTop: '72px', paddingBottom: '100px' }}>
       {/* Tabs */}
-      <div className="flex gap-2 mt-3 mb-4">
+      <div className="tabs-bar mt-3 mb-4">
         <button
           onClick={() => setTab('products')}
-          className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition ${tab === 'products' ? 'bg-blue-600 text-white' : 'bg-white text-slate-500'}`}
+          className={`tab-item ${tab === 'products' ? 'active' : ''}`}
         >
-          📦 المنتجات ({state.products.length})
+          {t('productsTab')} · {state.products.length}
         </button>
         <button
           onClick={() => setTab('categories')}
-          className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition ${tab === 'categories' ? 'bg-blue-600 text-white' : 'bg-white text-slate-500'}`}
+          className={`tab-item ${tab === 'categories' ? 'active' : ''}`}
         >
-          🏷️ الفئات ({state.categories.length})
+          {t('categoriesTab')} · {state.categories.length}
         </button>
       </div>
 
@@ -88,17 +113,22 @@ export default function Inventory() {
             <div className="flex-1 relative">
               <Search size={15} className="absolute top-1/2 -translate-y-1/2 right-3 text-slate-400" />
               <input
-                className="w-full border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                placeholder="بحث بالاسم أو الباركود..."
+                className="input-search"
+                placeholder={t('searchProductPh')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
+                style={{ paddingRight: '38px' }}
               />
             </div>
+            <button onClick={openAdd} className="btn-primary px-4 py-2">
+              <Plus size={16} /> {t('add')}
+            </button>
             <button
-              onClick={openAdd}
-              className="bg-blue-600 text-white px-4 py-2 rounded-xl flex items-center gap-1.5 text-sm font-semibold hover:bg-blue-700 transition active:scale-95"
+              onClick={() => setShowScanner(true)}
+              className="btn-ghost px-3 py-2"
+              title={t('scanBarcode')}
             >
-              <Plus size={16} /> إضافة
+              <ScanLine size={18} />
             </button>
           </div>
 
@@ -106,15 +136,16 @@ export default function Inventory() {
           <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
             <button
               onClick={() => { setSelectedCat(''); setShowLowOnly(false); }}
-              className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition ${!selectedCat && !showLowOnly ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}
+              className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition ${!selectedCat && !showLowOnly ? 'text-white' : 'bg-white text-slate-500 border border-slate-200'}`}
+              style={!selectedCat && !showLowOnly ? { background: 'linear-gradient(135deg,#4F46E5,#7C3AED)' } : {}}
             >
-              الكل
+              {t('all')}
             </button>
             <button
               onClick={() => { setShowLowOnly(!showLowOnly); setSelectedCat(''); }}
               className={`flex-shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium transition flex items-center gap-1 ${showLowOnly ? 'bg-amber-500 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}
             >
-              <AlertTriangle size={12} /> نقص مخزون ({lowCount})
+              <AlertTriangle size={12} /> {t('lowStockFilter')} ({lowCount})
             </button>
             {state.categories.map(c => (
               <button
@@ -130,41 +161,49 @@ export default function Inventory() {
 
           <div className="space-y-2">
             {filteredProducts.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-sm">لا توجد منتجات</div>
+              <div className="empty-state">
+                <Tag size={32} />
+                <p>{t('noProducts')}</p>
+              </div>
             ) : filteredProducts.map(p => {
               const cat = state.categories.find(c => c.id === p.category);
               const isLow = p.stock <= p.minStock;
               return (
                 <div
                   key={p.id}
-                  className={`bg-white rounded-2xl p-3.5 flex items-center gap-3 ${isLow ? 'border border-amber-200' : ''}`}
-                  style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+                  className="card p-3.5 flex items-center gap-3"
+                  style={{ borderColor: isLow ? '#FDE68A' : undefined, background: isLow ? 'linear-gradient(135deg,#FFFBEB,#FFFFFF)' : undefined }}
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-semibold text-sm text-slate-800">{p.name}</span>
-                      {isLow && <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="font-bold text-sm text-slate-800">{p.name}</span>
+                      {isLow && (
+                        <span className="badge badge-amber">
+                          <AlertTriangle size={9} /> {t('lowStockFilter')}
+                        </span>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-1.5 text-xs">
+                    <div className="flex flex-wrap gap-1.5 mb-1.5">
                       {cat && (
-                        <span className="px-1.5 py-0.5 rounded-md text-white text-[10px]" style={{ backgroundColor: cat.color }}>
+                        <span className="badge text-white text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: cat.color }}>
                           {cat.name}
                         </span>
                       )}
-                      <span className="text-slate-400">باركود: {p.barcode}</span>
+                      <span className="badge badge-gray text-[10px]">{p.barcode}</span>
                     </div>
-                    <div className="flex items-center gap-3 mt-1.5 text-xs">
-                      <span className="text-slate-500">شراء: <b>{formatMoney(p.buyPrice)}</b></span>
-                      <span className="text-slate-500">بيع: <b className="text-green-600">{formatMoney(p.sellPrice)}</b></span>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+                      <span style={{ color: 'var(--text-3)' }}>{t('buyPrice')}: <b className="text-slate-700">{formatMoney(p.buyPrice)}</b></span>
+                      <span className="text-orange-500">{t('avgCostLabel')}: <b>{formatMoney(p.avgCost)}</b></span>
+                      <span style={{ color: 'var(--text-3)' }}>{t('sellPrice')}: <b className="text-green-600">{formatMoney(p.sellPrice)}</b></span>
                       <span className={`font-bold ${isLow ? 'text-amber-500' : 'text-blue-600'}`}>📦 {p.stock} {p.unit}</span>
                     </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <button onClick={() => openEdit(p)} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition">
-                      <Edit size={15} />
+                    <button onClick={() => openEdit(p)} className="btn-icon" style={{ background: 'linear-gradient(135deg,#EEF2FF,#E0E7FF)' }}>
+                      <Edit size={14} className="text-indigo-600" />
                     </button>
-                    <button onClick={() => deleteProduct(p.id)} className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-100 transition">
-                      <Trash2 size={15} />
+                    <button onClick={() => deleteProduct(p.id)} className="btn-icon" style={{ background: '#FFF1F2', color: '#DC2626' }}>
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -179,31 +218,32 @@ export default function Inventory() {
           <div className="flex justify-end mb-3">
             <button
               onClick={() => { setEditCat(null); setCatForm({ name: '', color: COLORS[0] }); setShowCatModal(true); }}
-              className="bg-blue-600 text-white px-4 py-2 rounded-xl flex items-center gap-1.5 text-sm font-semibold hover:bg-blue-700 transition active:scale-95"
+              className="btn-primary px-4 py-2"
             >
-              <Plus size={16} /> فئة جديدة
+              <Plus size={16} /> {t('addCategory')}
             </button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             {state.categories.map(c => {
               const count = state.products.filter(p => p.category === c.id).length;
               return (
-                <div key={c.id} className="bg-white rounded-2xl p-4 flex items-center gap-3" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-                  <div className="w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center" style={{ backgroundColor: c.color + '30' }}>
-                    <Tag size={18} style={{ color: c.color }} />
+                <div key={c.id} className="card p-4 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl flex-shrink-0 flex items-center justify-center"
+                    style={{ background: `${c.color}25`, border: `1.5px solid ${c.color}55` }}>
+                    <Tag size={17} style={{ color: c.color }} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-slate-800 truncate">{c.name}</p>
-                    <p className="text-xs text-slate-400">{count} منتج</p>
+                    <p className="font-bold text-sm text-slate-800 truncate">{c.name}</p>
+                    <p className="text-[11px] font-medium mt-0.5" style={{ color: c.color }}>{count} {t('items')}</p>
                   </div>
                   <div className="flex gap-1">
                     <button
                       onClick={() => { setEditCat(c); setCatForm({ name: c.name, color: c.color }); setShowCatModal(true); }}
-                      className="p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition"
-                    ><Edit size={13} /></button>
+                      className="btn-icon" style={{ background: 'linear-gradient(135deg,#EEF2FF,#E0E7FF)' }}
+                    ><Edit size={13} className="text-indigo-600" /></button>
                     <button
                       onClick={() => dispatch({ type: 'DELETE_CATEGORY', payload: c.id })}
-                      className="p-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition"
+                      className="btn-icon" style={{ background: '#FFF1F2', color: '#DC2626' }}
                     ><Trash2 size={13} /></button>
                   </div>
                 </div>
@@ -214,104 +254,95 @@ export default function Inventory() {
       )}
 
       {/* Product Modal */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editing ? 'تعديل المنتج' : 'إضافة منتج جديد'}>
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editing ? t('editProductTitle') : t('addProductTitle')}>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">اسم المنتج *</label>
-            <input
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="اسم المنتج"
-            />
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('productName')} *</label>
+            <input className="input-base" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={t('productName')} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">الباركود</label>
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('barcode')}</label>
             <div className="flex gap-2">
-              <input
-                className="flex-1 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} placeholder="باركود المنتج"
-              />
-              <button className="p-2.5 bg-slate-100 rounded-xl text-slate-500 hover:bg-slate-200 transition" title="مسح الباركود">
-                <ScanLine size={18} />
+              <input className="input-base flex-1" value={form.barcode} onChange={e => setForm({ ...form, barcode: e.target.value })} placeholder={t('barcodeOptional')} />
+              <button className="btn-ghost px-3" onClick={() => setShowScanner(true)} type="button">
+                <ScanLine size={17} />
               </button>
             </div>
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">الفئة</label>
-            <select
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-              value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
-            >
-              <option value="">اختر الفئة</option>
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('category')}</label>
+            <select className="input-base" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+              <option value="">{t('uncategorized')}</option>
               {state.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">سعر الشراء (د.ع)</label>
-              <input type="number" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={form.buyPrice || ''} onChange={e => setForm({ ...form, buyPrice: +e.target.value })} placeholder="0" />
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('buyPriceLabel')}</label>
+              <input type="number" className="input-base" value={form.buyPrice || ''} onChange={e => setForm({ ...form, buyPrice: +e.target.value })} placeholder="0" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">سعر البيع (د.ع)</label>
-              <input type="number" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={form.sellPrice || ''} onChange={e => setForm({ ...form, sellPrice: +e.target.value })} placeholder="0" />
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('sellPriceLabel')}</label>
+              <input type="number" className="input-base" value={form.sellPrice || ''} onChange={e => setForm({ ...form, sellPrice: +e.target.value })} placeholder="0" />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">الكمية</label>
-              <input type="number" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={form.stock || ''} onChange={e => setForm({ ...form, stock: +e.target.value })} placeholder="0" />
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('currentStock')}</label>
+              <input type="number" className="input-base" value={form.stock || ''} onChange={e => setForm({ ...form, stock: +e.target.value })} placeholder="0" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">الحد الأدنى</label>
-              <input type="number" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={form.minStock || ''} onChange={e => setForm({ ...form, minStock: +e.target.value })} placeholder="5" />
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('minStock')}</label>
+              <input type="number" className="input-base" value={form.minStock || ''} onChange={e => setForm({ ...form, minStock: +e.target.value })} placeholder="5" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">الوحدة</label>
-              <select
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}
-              >
-                {['حبة', 'كغ', 'لتر', 'م', 'Pack', 'Box', 'كرتون', 'كيس'].map(u => <option key={u} value={u}>{u}</option>)}
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('unit')}</label>
+              <select className="input-base" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}>
+                {UNIT_OPTIONS.map(u => <option key={u} value={u}>{lang === 'en' ? UNIT_LABELS_EN[u] : u}</option>)}
               </select>
             </div>
           </div>
-          <button onClick={saveProduct} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition active:scale-95 mt-2">
-            {editing ? '✅ حفظ التعديلات' : '➕ إضافة المنتج'}
+          <button onClick={saveProduct} className="btn-primary w-full py-3.5 mt-1">
+            {editing ? `✅ ${t('save')}` : `➕ ${t('add')}`}
           </button>
         </div>
       </Modal>
 
       {/* Category Modal */}
-      <Modal isOpen={showCatModal} onClose={() => setShowCatModal(false)} title={editCat ? 'تعديل الفئة' : 'فئة جديدة'} size="sm">
+      <Modal isOpen={showCatModal} onClose={() => setShowCatModal(false)} title={editCat ? t('editCategoryTitle') : t('addCategoryTitle')} size="sm">
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">اسم الفئة *</label>
-            <input
-              className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} placeholder="اسم الفئة"
-            />
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('categoryName')} *</label>
+            <input className="input-base" value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} placeholder={t('categoryName')} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-2">اللون</label>
+            <label className="block text-xs font-bold text-slate-500 mb-2">{t('color')}</label>
             <div className="flex flex-wrap gap-2">
               {COLORS.map(c => (
                 <button
                   key={c}
                   onClick={() => setCatForm({ ...catForm, color: c })}
-                  className={`w-8 h-8 rounded-lg transition ${catForm.color === c ? 'ring-2 ring-offset-2 ring-slate-400 scale-110' : ''}`}
-                  style={{ backgroundColor: c }}
+                  className="w-9 h-9 rounded-xl transition"
+                  style={{ backgroundColor: c, boxShadow: catForm.color === c ? `0 0 0 3px white, 0 0 0 5px ${c}` : 'none', transform: catForm.color === c ? 'scale(1.1)' : 'scale(1)' }}
                 />
               ))}
             </div>
           </div>
-          <button onClick={saveCat} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition active:scale-95">
-            {editCat ? '✅ حفظ' : '➕ إضافة'}
+          <button onClick={saveCat} className="btn-primary w-full py-3.5">
+            {editCat ? `✅ ${t('save')}` : `➕ ${t('add')}`}
           </button>
         </div>
       </Modal>
+
+      <BarcodeScanner
+        isOpen={showScanner}
+        onClose={() => setShowScanner(false)}
+        onScan={(code) => {
+          setShowScanner(false);
+          handleBarcodeScanned(code);
+        }}
+        title={t('scanBarcode')}
+      />
     </div>
   );
 }

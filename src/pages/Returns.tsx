@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
+import { useLang } from '../context/LangContext';
 import { generateId, generateInvoiceNo } from '../utils/storage';
 import { formatMoney, formatDate, todayISO } from '../utils/helpers';
 import Modal from '../components/Modal';
@@ -8,6 +9,7 @@ import type { ReturnInvoice, InvoiceItem } from '../types';
 
 export default function Returns() {
   const { state, dispatch } = useApp();
+  const { t } = useLang();
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState('');
   const [productSearch, setProductSearch] = useState('');
@@ -60,71 +62,75 @@ export default function Returns() {
   );
 
   return (
-    <div className="pb-24 pt-16 px-3 fade-in">
-      <div className="flex gap-2 mt-3 mb-4">
-        <button onClick={() => setReturnType('sale-return')} className={`flex-1 py-2 rounded-xl text-sm font-semibold transition ${returnType === 'sale-return' ? 'bg-orange-500 text-white' : 'bg-white text-slate-500'}`}>
-          📤 مرتجع مبيعات
+    <div className="px-3 fade-in" style={{ paddingTop: '72px', paddingBottom: '100px' }}>
+      <div className="tabs-bar mt-3 mb-3">
+        <button onClick={() => setReturnType('sale-return')} className={`tab-item ${returnType === 'sale-return' ? 'active' : ''}`}>
+          {t('salesReturnTab')}
         </button>
-        <button onClick={() => setReturnType('purchase-return')} className={`flex-1 py-2 rounded-xl text-sm font-semibold transition ${returnType === 'purchase-return' ? 'bg-indigo-500 text-white' : 'bg-white text-slate-500'}`}>
-          📥 مرتجع مشتريات
+        <button onClick={() => setReturnType('purchase-return')} className={`tab-item ${returnType === 'purchase-return' ? 'active' : ''}`}>
+          {t('purchaseReturnTab')}
         </button>
       </div>
 
-      <div className={`text-xs rounded-xl px-3 py-2 mb-3 ${returnType === 'sale-return' ? 'bg-orange-50 text-orange-700' : 'bg-indigo-50 text-indigo-700'}`}>
-        {returnType === 'sale-return'
-          ? '📦 مرتجع مبيعات: يزيد المخزون (المنتج رجع إلى المتجر)'
-          : '📦 مرتجع مشتريات: ينقص المخزون (المنتج يعود إلى المورد)'}
+      <div className={`text-xs rounded-xl px-3 py-2 mb-3 font-medium ${returnType === 'sale-return' ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+        {returnType === 'sale-return' ? t('salesReturnInfo') : t('purchaseReturnInfo')}
       </div>
 
       <div className="flex gap-2 mb-4">
         <div className="flex-1 relative">
           <Search size={15} className="absolute top-1/2 -translate-y-1/2 right-3 text-slate-400" />
           <input
-            className="w-full border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-            placeholder="بحث..."
+            className="input-search"
+            placeholder={t('searchReturnsPh')}
             value={search} onChange={e => setSearch(e.target.value)}
+            style={{ paddingRight: '38px' }}
           />
         </div>
         <button
           onClick={() => { resetForm(); setShowAdd(true); }}
-          className={`px-4 py-2 rounded-xl flex items-center gap-1.5 text-sm font-semibold text-white transition active:scale-95 ${returnType === 'sale-return' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-indigo-500 hover:bg-indigo-600'}`}
+          className={`btn-primary px-4 py-2 ${returnType === 'purchase-return' ? '' : ''}`}
+          style={returnType === 'purchase-return' ? { background: 'linear-gradient(135deg,#4F46E5,#7C3AED)' } : { background: 'linear-gradient(135deg,#F97316,#EA580C)' }}
         >
-          <Plus size={16} /> مرتجع
+          <Plus size={16} /> {t('returnBtn')}
         </button>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 stagger">
         {filteredReturns.filter(r => r.type === returnType).length === 0
-          ? <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-sm">لا توجد مرتجعات</div>
+          ? <div className="empty-state"><Trash2 size={28} /><p>{t('noReturns')}</p></div>
           : filteredReturns.filter(r => r.type === returnType).map(r => {
+            const isS = r.type === 'sale-return';
             return (
-              <div key={r.id} className="bg-white rounded-2xl p-3.5" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+              <div key={r.id} className="card p-3.5">
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="font-bold text-sm text-slate-800">{r.returnNo}</span>
-                    <p className="text-xs text-slate-400 mt-0.5">{formatDate(r.date)} · {r.partyName || (returnType === 'sale-return' ? 'عميل عام' : 'مورد عام')}</p>
-                    {r.reason && <p className="text-xs text-slate-500 mt-0.5">السبب: {r.reason}</p>}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-sm text-slate-800">{r.returnNo}</span>
+                      <span className={`badge ${isS ? 'badge-amber' : 'badge-blue'}`}>
+                        {isS ? t('salesReturnTab') : t('purchaseReturnTab')}
+                      </span>
+                    </div>
+                    <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>{formatDate(r.date)} · {r.partyName || (isS ? t('generalCustomer') : t('supplier'))}</p>
+                    {r.reason && <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-4)' }}>{t('reason')}: {r.reason}</p>}
                   </div>
-                  <span className={`font-bold text-sm ${returnType === 'sale-return' ? 'text-orange-500' : 'text-indigo-500'}`}>{formatMoney(r.total)}</span>
+                  <span className={`font-bold ${isS ? 'text-orange-500' : 'text-indigo-500'}`}>{formatMoney(r.total)}</span>
                 </div>
               </div>
             );
           })}
       </div>
 
-      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title={returnType === 'sale-return' ? 'مرتجع مبيعات جديد' : 'مرتجع مشتريات جديد'}>
+      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title={returnType === 'sale-return' ? t('newSaleReturnTitle') : t('newPurchaseReturnTitle')}>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">التاريخ</label>
-              <input type="date" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                value={date} onChange={e => setDate(e.target.value)} />
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('date')}</label>
+              <input type="date" className="input-base" value={date} onChange={e => setDate(e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">{returnType === 'sale-return' ? 'العميل' : 'المورد'}</label>
-              <select className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
-                value={partyId} onChange={e => setPartyId(e.target.value)}>
-                <option value="">{returnType === 'sale-return' ? 'عميل عام' : 'مورد عام'}</option>
+              <label className="block text-xs font-bold text-slate-500 mb-1.5">{returnType === 'sale-return' ? t('customer') : t('supplier')}</label>
+              <select className="input-base" value={partyId} onChange={e => setPartyId(e.target.value)}>
+                <option value="">{returnType === 'sale-return' ? t('generalCustomerOpt') : t('chooseSupplier')}</option>
                 {(returnType === 'sale-return' ? state.customers : state.suppliers).map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -133,17 +139,16 @@ export default function Returns() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">سبب الإرجاع</label>
-            <input className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              value={reason} onChange={e => setReason(e.target.value)} placeholder="اختياري - سبب الإرجاع" />
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('reason')}</label>
+            <input className="input-base" value={reason} onChange={e => setReason(e.target.value)} placeholder={t('reasonPh')} />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">اختر المواد المرتجعة</label>
+            <label className="block text-xs font-bold text-slate-500 mb-1.5">{t('items')}</label>
             <div className="relative">
               <input
-                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                placeholder="ابحث عن مادة..."
+                className="input-base"
+                placeholder={t('searchItemPh')}
                 value={productSearch} onChange={e => { setProductSearch(e.target.value); setShowProductList(true); }}
                 onFocus={() => setShowProductList(true)}
               />
@@ -156,38 +161,39 @@ export default function Returns() {
                       <span className="text-xs text-slate-400">{p.stock} {p.unit}</span>
                     </button>
                   ))}
-                  {filteredProducts.length === 0 && <p className="px-3 py-3 text-xs text-slate-400 text-center">لا توجد نتائج</p>}
+                  {filteredProducts.length === 0 && <p className="px-3 py-3 text-xs text-slate-400 text-center">{t('noResults')}</p>}
                 </div>
               )}
             </div>
           </div>
 
           {items.length > 0 && (
-            <div className="space-y-1.5 bg-slate-50 rounded-xl p-2">
-              <p className="text-xs font-semibold text-slate-500 px-1">المواد المرتجعة ({items.length})</p>
+            <div className="inset-card space-y-1.5">
+              <p className="text-xs font-bold mb-2" style={{ color: 'var(--text-3)' }}>{t('itemsSection')} · {items.length}</p>
               {items.map((item, idx) => (
-                <div key={idx} className="flex items-center gap-2 bg-white rounded-xl px-2 py-2">
-                  <span className="flex-1 text-xs font-medium text-slate-700 truncate">{item.productName}</span>
+                <div key={idx} className="flex items-center gap-2 bg-white rounded-xl px-2 py-2 shadow-sm">
+                  <span className="flex-1 text-xs font-semibold text-slate-700 truncate">{item.productName}</span>
                   <input type="number" className="w-14 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center"
                     value={item.qty} onChange={e => updateItem(idx, 'qty', +e.target.value)} min={1} />
                   <input type="number" className="w-20 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center"
                     value={item.price} onChange={e => updateItem(idx, 'price', +e.target.value)} />
-                  <button onClick={() => removeItem(idx)} className="text-red-400 hover:text-red-600 p-1"><Trash2 size={13} /></button>
+                  <button onClick={() => removeItem(idx)} className="btn-icon" style={{ background: '#FFF1F2', color: '#DC2626', width: '28px', height: '28px' }}><Trash2 size={11} /></button>
                 </div>
               ))}
             </div>
           )}
 
-          <div className={`rounded-xl p-3 ${returnType === 'sale-return' ? 'bg-orange-50' : 'bg-indigo-50'}`}>
+          <div className="inset-card">
             <div className="flex justify-between font-bold text-base">
-              <span className="text-slate-700">الإجمالي:</span>
+              <span className="text-slate-700">{t('total')}:</span>
               <span className={returnType === 'sale-return' ? 'text-orange-600' : 'text-indigo-600'}>{formatMoney(total)}</span>
             </div>
           </div>
 
           <button onClick={saveReturn} disabled={items.length === 0}
-            className={`w-full text-white py-3 rounded-xl font-bold transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed ${returnType === 'sale-return' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-indigo-500 hover:bg-indigo-600'}`}>
-            ✅ حفظ المرتجع
+            className="btn-primary w-full py-3.5 disabled:opacity-40 disabled:cursor-not-allowed"
+            style={returnType === 'purchase-return' ? {} : { background: 'linear-gradient(135deg,#F97316,#EA580C)' }}>
+            {t('saveReturn')}
           </button>
         </div>
       </Modal>

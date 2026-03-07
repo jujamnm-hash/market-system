@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useLang } from '../context/LangContext';
 import { formatMoney } from '../utils/helpers';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
@@ -9,6 +10,7 @@ const PIE_COLORS = ['#ef4444', '#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ec4
 
 export default function Reports() {
   const { state } = useApp();
+  const { t, lang } = useLang();
   const [period, setPeriod] = useState<Period>('month');
 
   const now = new Date();
@@ -29,7 +31,11 @@ export default function Reports() {
   const totalPurchasesAmt = filteredPurchases.reduce((s, i) => s + i.total, 0);
   const totalExpenses = filteredExpenses.reduce((s, e) => s + e.amount, 0);
   const totalSalaries = filteredSalaries.reduce((s, p) => s + p.amount, 0);
-  const grossProfit = totalSales - totalPurchasesAmt;
+  // COGS using Weighted Average Cost recorded at time of sale
+  const totalCOGS = filteredSales
+    .flatMap(s => s.items)
+    .reduce((sum, item) => sum + item.qty * (item.costPrice ?? 0), 0);
+  const grossProfit = totalSales - totalCOGS;
   const netProfit = grossProfit - totalExpenses - totalSalaries;
 
   // Chart data - last 7 days or months
@@ -43,7 +49,7 @@ export default function Reports() {
       if (period === 'year') {
         d.setMonth(now.getMonth() - i);
         key = d.toISOString().slice(0, 7);
-        label = d.toLocaleString('ar', { month: 'short' });
+        label = d.toLocaleString(lang === 'ar' ? 'ar' : 'en', { month: 'short' });
       } else {
         d.setDate(now.getDate() - i);
         key = d.toISOString().slice(0, 10);
@@ -51,10 +57,10 @@ export default function Reports() {
       }
       const sales = state.sales.filter(s => s.date.startsWith(key)).reduce((s, x) => s + x.total, 0);
       const purchases = state.purchases.filter(p => p.date.startsWith(key)).reduce((s, x) => s + x.total, 0);
-      result.push({ name: label, المبيعات: sales, المشتريات: purchases });
+      result.push({ name: label, sales, purchases });
     }
     return result;
-  }, [state.sales, state.purchases, period]);
+  }, [state.sales, state.purchases, period, lang]);
 
   // Top products
   const topProducts = useMemo(() => {
@@ -83,59 +89,59 @@ export default function Reports() {
   const supplierDebtTotal = state.purchases.reduce((s, i) => s + i.remaining, 0);
 
   return (
-    <div className="pb-24 pt-16 px-3 fade-in">
+    <div className="px-3 fade-in" style={{ paddingTop: '72px', paddingBottom: '100px' }}>
       {/* Period Toggle */}
-      <div className="flex gap-2 mt-3 mb-4">
+      <div className="tabs-bar mt-3 mb-4">
         {(['day', 'month', 'year'] as Period[]).map(p => (
-          <button key={p} onClick={() => setPeriod(p)}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition ${period === p ? 'bg-blue-600 text-white' : 'bg-white text-slate-500'}`}>
-            {p === 'day' ? 'يوم' : p === 'month' ? 'شهر' : 'سنة'}
+          <button key={p} onClick={() => setPeriod(p)} className={`tab-item ${period === p ? 'active' : ''}`}>
+            {p === 'day' ? t('dayPeriod') : p === 'month' ? t('monthPeriod') : t('yearPeriod')}
           </button>
         ))}
       </div>
 
       {/* P&L Summary */}
-      <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-        <h3 className="font-bold text-slate-800 mb-3 text-sm">📊 ملخص الأرباح والخسائر</h3>
+      <div className="card p-4 mb-4">
+        <h3 className="section-title">{t('profitLoss')}</h3>
         <div className="space-y-2 text-sm">
-          <Row label="إجمالي المبيعات" value={formatMoney(totalSales)} color="text-green-600" />
-          <Row label="إجمالي المشتريات" value={`- ${formatMoney(totalPurchasesAmt)}`} color="text-red-500" />
-          <div className="border-t border-slate-100 pt-2">
-            <Row label="مجمل الربح" value={formatMoney(grossProfit)} color={grossProfit >= 0 ? 'text-blue-600' : 'text-red-500'} bold />
+          <Row label={t('totalSalesRep')} value={formatMoney(totalSales)} color="text-green-600" />
+          <Row label={t('cogs')} value={`- ${formatMoney(totalCOGS)}`} color="text-red-500" />
+          <div className="rounded-xl px-3 py-2 my-1" style={{ background: grossProfit >= 0 ? '#EEF2FF' : '#FFF1F2' }}>
+            <Row label={t('grossProfit')} value={formatMoney(grossProfit)} color={grossProfit >= 0 ? 'text-indigo-600' : 'text-red-500'} bold />
           </div>
-          <Row label="المصروفات" value={`- ${formatMoney(totalExpenses)}`} color="text-red-500" />
-          <Row label="الرواتب" value={`- ${formatMoney(totalSalaries)}`} color="text-red-500" />
-          <div className="border-t border-slate-200 pt-2">
-            <Row label="صافي الربح" value={formatMoney(netProfit)} color={netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
+          <Row label={t('purchasesInfo')} value={formatMoney(totalPurchasesAmt)} color="text-slate-400" />
+          <Row label={t('totalExpensesRep')} value={`- ${formatMoney(totalExpenses)}`} color="text-red-500" />
+          <Row label={t('totalSalaries')} value={`- ${formatMoney(totalSalaries)}`} color="text-red-500" />
+          <div className="rounded-xl px-3 py-2 mt-1" style={{ background: netProfit >= 0 ? '#ECFDF5' : '#FFF1F2' }}>
+            <Row label={t('netProfit')} value={formatMoney(netProfit)} color={netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'} bold />
           </div>
         </div>
       </div>
 
       {/* Chart */}
-      {chartData.some(d => d.المبيعات > 0 || d.المشتريات > 0) && (
-        <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          <h3 className="font-bold text-slate-800 mb-3 text-sm">📈 مبيعات ومشتريات</h3>
+      {chartData.some(d => d.sales > 0 || d.purchases > 0) && (
+        <div className="card p-4 mb-4">
+          <h3 className="section-title">{t('salesVsPurchases')}</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} />
               <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
               <Tooltip formatter={(v) => formatMoney(Number(v ?? 0))} />
-              <Bar dataKey="المبيعات" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="المشتريات" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="sales" name={t('chartSales')} fill="#6366F1" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="purchases" name={t('chartPurchases')} fill="#A78BFA" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
           <div className="flex justify-center gap-4 mt-2">
-            <div className="flex items-center gap-1.5 text-xs text-slate-500"><div className="w-3 h-3 bg-blue-500 rounded-sm" />مبيعات</div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500"><div className="w-3 h-3 bg-purple-500 rounded-sm" />مشتريات</div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500"><div className="w-3 h-3 rounded-sm" style={{ background: '#6366F1' }} />{t('chartSales')}</div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500"><div className="w-3 h-3 rounded-sm" style={{ background: '#A78BFA' }} />{t('chartPurchases')}</div>
           </div>
         </div>
       )}
 
       {/* Top Products */}
       {topProducts.length > 0 && (
-        <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          <h3 className="font-bold text-slate-800 mb-3 text-sm">🏆 أكثر المنتجات مبيعاً</h3>
+        <div className="card p-4 mb-4">
+          <h3 className="section-title">{t('topProducts')}</h3>
           <div className="space-y-2">
             {topProducts.map((p, i) => (
               <div key={i} className="flex items-center gap-3">
@@ -148,10 +154,10 @@ export default function Reports() {
                     <span className="text-xs text-green-600 font-semibold flex-shrink-0 mr-2">{formatMoney(p.revenue)}</span>
                   </div>
                   <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, (p.revenue / topProducts[0].revenue) * 100)}%` }} />
+                    <div className="h-full rounded-full" style={{ width: `${Math.min(100, (p.revenue / topProducts[0].revenue) * 100)}%`, background: 'linear-gradient(90deg,#6366F1,#A78BFA)' }} />
                   </div>
                 </div>
-                <span className="text-xs text-slate-400 flex-shrink-0">{p.qty} قطعة</span>
+                <span className="text-xs text-slate-400 flex-shrink-0">{p.qty} {t('items')}</span>
               </div>
             ))}
           </div>
@@ -160,8 +166,8 @@ export default function Reports() {
 
       {/* Expense Pie */}
       {expensePie.length > 0 && (
-        <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          <h3 className="font-bold text-slate-800 mb-3 text-sm">💸 توزيع المصروفات</h3>
+        <div className="card p-4 mb-4">
+          <h3 className="section-title">{t('expensesByCategory')}</h3>
           <div className="flex items-center gap-4">
             <PieChart width={140} height={140}>
               <Pie data={expensePie} cx={65} cy={65} innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">
@@ -182,18 +188,16 @@ export default function Reports() {
       )}
 
       {/* Balance Sheet */}
-      <div className="bg-white rounded-2xl p-4 mb-4" style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-        <h3 className="font-bold text-slate-800 mb-3 text-sm">⚖️ الميزانية العمومية</h3>
+      <div className="card p-4 mb-4">
+        <h3 className="section-title">⚖️ {t('inventoryValue')}</h3>
         <div className="space-y-2 text-sm">
-          <p className="text-xs font-bold text-slate-500 uppercase">الأصول</p>
-          <Row label="قيمة المخزون (شراء)" value={formatMoney(inventoryValue)} color="text-blue-600" />
-          <Row label="قيمة المخزون (بيع)" value={formatMoney(inventorySellValue)} color="text-blue-700" />
-          <Row label="ديون العملاء" value={formatMoney(customerDebtTotal)} color="text-amber-600" />
+          <Row label={t('buyValue')} value={formatMoney(inventoryValue)} color="text-blue-600" />
+          <Row label={t('sellValue')} value={formatMoney(inventorySellValue)} color="text-blue-700" />
+          <Row label={t('customerDebtRep')} value={formatMoney(customerDebtTotal)} color="text-amber-600" />
           <div className="border-t border-slate-100 pt-2">
-            <Row label="إجمالي الأصول" value={formatMoney(inventoryValue + customerDebtTotal)} color="text-emerald-700" bold />
+            <Row label={t('totalSalesRep')} value={formatMoney(inventoryValue + customerDebtTotal)} color="text-emerald-700" bold />
           </div>
-          <p className="text-xs font-bold text-slate-500 uppercase mt-2">الالتزامات</p>
-          <Row label="ديون الموردين" value={formatMoney(supplierDebtTotal)} color="text-red-500" />
+          <Row label={t('supplierDebtRep')} value={formatMoney(supplierDebtTotal)} color="text-red-500" />
         </div>
       </div>
     </div>
